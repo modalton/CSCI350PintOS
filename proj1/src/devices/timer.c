@@ -17,6 +17,9 @@
 #error TIMER_FREQ <= 1000 recommended
 #endif
 
+//Pintos list of sleeping processes
+static struct list sleeping_threads_list;
+
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
@@ -37,6 +40,8 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  //update our new list
+  list_init(&sleeping_threads_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -89,11 +94,19 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
+  ASSERT (intr_get_level() == INTR_ON);
 
-  ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  //replace broken while loop with own code
+
+  //disable intr
+  //ticks to stop -> add thread to sleeping list -> block thread
+  enum intr_level old_level = intr_disable();
+  thread_current()->ticks = timer_ticks()+ticks;
+  list_insert_ordered(&sleeping_threads_list, &thread_current()->elem, (list_less_func *) &comparator, NULL);
+  thread_block();
+  intr_set_level(old_level);
+  //enable intr
+  
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -172,6 +185,27 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+
+  if(list_empty(&sleeping_threads_list))
+  {
+    struct list_elem *iter= list_begin(&sleeping_threads_list);
+    while(iter!=list_end(&sleeping_threads_list))
+    {
+      struct thread *t = list_entry(iter, struct thread, elem);
+
+      if(ticks >= t->ticks)
+      {
+        list_remove(iter);
+        thread_unblock(t);
+        iter = list_begin(&sleeping_threads_list);
+      }
+      else
+      {
+        iter = list_next(iter);
+      }
+    }
+
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

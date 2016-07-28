@@ -69,7 +69,7 @@ static bool is_thread (struct thread *) UNUSED;
 static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
-static tid_t allocate_tid (void);
+static tid_t allocate_tid (void); 
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -171,6 +171,9 @@ thread_create (const char *name, int priority,
   struct switch_entry_frame *ef;
   struct switch_threads_frame *sf;
   tid_t tid;
+  //User added
+  enum intr_level old_level;
+
 
   ASSERT (function != NULL);
 
@@ -197,6 +200,7 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
+
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -234,10 +238,10 @@ thread_unblock (struct thread *t)
   enum intr_level old_level;
 
   ASSERT (is_thread (t));
-
-  old_level = intr_disable ();
+  //USer added
+  old_level=intr_disable();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered(&ready_list,&t->elem, (list_less_func*) &comparator, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -275,6 +279,7 @@ thread_tid (void)
   return thread_current ()->tid;
 }
 
+
 /* Deschedules the current thread and destroys it.  Never
    returns to the caller. */
 void
@@ -307,8 +312,11 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+  if (cur != idle_thread)
+  {
+    list_insert_ordered(&ready_list, &cur->elem, (list_less_func *) &comparator, NULL);
+  } 
+    
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -463,6 +471,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  t->ticks--;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -577,6 +586,19 @@ allocate_tid (void)
   lock_release (&tid_lock);
 
   return tid;
+}
+
+bool comparator (const struct list_elem *first, const struct list_elem *second)
+{
+  struct thread *first_thread = list_entry(first, struct thread, elem);
+  struct thread *second_thread = list_entry(second, struct thread, elem);
+
+  if(first_thread > second_thread)
+  {
+    return true;
+
+  }
+  return false;
 }
 
 /* Offset of `stack' member within `struct thread'.
