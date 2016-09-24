@@ -27,11 +27,15 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+//user added helper functions
+bool cmp_less(const struct list_elem* a, const struct list_elem* b, void* aux);
+
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
+static void wake_sleep();
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -94,15 +98,15 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
+  if(ticks<=0){return;}
   ASSERT (intr_get_level() == INTR_ON);
 
   //replace broken while loop with own code
-
-  //disable intr
   //ticks to stop -> add thread to sleeping list -> block thread
   enum intr_level old_level = intr_disable();
-  thread_current()->ticks = timer_ticks()+ticks;
-  list_insert_ordered(&sleeping_threads_list, &thread_current()->elem, (list_less_func *) &comparator, NULL);
+  thread_current()->wake_up_time = timer_ticks()+ticks;
+  list_insert_ordered(&sleeping_threads_list, &thread_current()->sleeping_list_elem, cmp_less, NULL);
+  //intr must be off for thread block
   thread_block();
   intr_set_level(old_level);
   //enable intr
@@ -184,27 +188,28 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  wake_sleep();
+  //now that all eligible threads are woken up
   thread_tick ();
+}
 
-  if(list_empty(&sleeping_threads_list))
+static void wake_sleep(){
+  //readded to seperate from handler b/c handelr was acting up in calibrate
+  struct list_elem *iter;
+  for(iter=list_begin(&sleeping_threads_list); iter!=list_end(&sleeping_threads_list); iter=list_next(iter))
   {
-    struct list_elem *iter= list_begin(&sleeping_threads_list);
-    while(iter!=list_end(&sleeping_threads_list))
+    struct thread *t = list_entry(iter, struct thread, sleeping_list_elem);
+
+    if(timer_ticks() >= t->wake_up_time)
     {
-      struct thread *t = list_entry(iter, struct thread, elem);
-
-      if(ticks >= t->ticks)
-      {
-        list_remove(iter);
-        thread_unblock(t);
-        iter = list_begin(&sleeping_threads_list);
-      }
-      else
-      {
-        iter = list_next(iter);
-      }
+      t->wake_up_time=0;
+      thread_unblock(t);
+      list_remove(iter);
     }
-
+    else
+    {
+      break;
+    }
   }
 }
 
@@ -277,4 +282,13 @@ real_time_delay (int64_t num, int32_t denom)
      the possibility of overflow. */
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
+}
+
+//define user functions
+bool cmp_less(const struct list_elem* a, const struct list_elem* b, void* aux){
+  struct thread* first= list_entry(a, struct thread, sleeping_list_elem);
+  struct thread* second= list_entry(b, struct thread, sleeping_list_elem);
+
+  if(first->wake_up_time < second->wake_up_time){return true;}
+  else{return false;}
 }

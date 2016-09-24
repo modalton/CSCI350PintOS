@@ -19,8 +19,7 @@
 #include "threads/vaddr.h"
 
 static thread_func start_process NO_RETURN;
-//User change: added saved filed name ptr to file name
-static bool load (const char *cmdline, void (**eip) (void), void **esp, char** name_ptr);
+static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -38,13 +37,6 @@ process_execute (const char *file_name)
   if (fn_copy == NULL)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
-
-  //User change
-  //Getting load functions filename
-  char *name_ptr;
-  //parse arg for variable
-  file_name = strtok_r((char*),file_name," ", &name_ptr);
-
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
@@ -67,10 +59,7 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-
-  //User change: need to handle extra argument
-  success = load (file_name, &if_.eip, &if_.esp,&name_ptr);
-  //Need handling if(success) blah blah
+  success = load (file_name, &if_.eip, &if_.esp);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -79,7 +68,7 @@ start_process (void *file_name_)
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
-     threads/ghjjintr-stubs.S).  Because intr_exit takes all of its
+     threads/intr-stubs.S).  Because intr_exit takes all of its
      arguments on the stack in the form of a `struct intr_frame',
      we just point the stack pointer (%esp) to our stack frame
      and jump to it. */
@@ -99,8 +88,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  //User change: basic state machine for child process
-  //TODO
+  return -1;
 }
 
 /* Free the current process's resources. */
@@ -207,12 +195,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-//User Change: Basic stats for setting up stck instead of function
-#define WORD_SIZE 4;
-#define DEFAULT_ARGV 2; //is this right?
-//TODO: change setup_stack function and pass args
-
-
+static bool setup_stack (void **esp);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -222,9 +205,8 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
-//User change: added in the name ptr in constructor
 bool
-load (const char *file_name, void (**eip) (void), void **esp, char **name_ptr) 
+load (const char *file_name, void (**eip) (void), void **esp) 
 {
   struct thread *t = thread_current ();
   struct Elf32_Ehdr ehdr;
@@ -319,7 +301,6 @@ load (const char *file_name, void (**eip) (void), void **esp, char **name_ptr)
         }
     }
 
-    //TODO add variables to function params bc  
   /* Set up stack. */
   if (!setup_stack (esp))
     goto done;
@@ -446,7 +427,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-//TODO: Set this one up with proper arguments and correct ones above
 setup_stack (void **esp) 
 {
   uint8_t *kpage;
@@ -457,16 +437,10 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-      {
         *esp = PHYS_BASE;
-      }
       else
-      {
         palloc_free_page (kpage);
-        //TODO do i return sucessess here?
-      }    
     }
-
   return success;
 }
 

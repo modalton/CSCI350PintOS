@@ -91,8 +91,17 @@ struct thread
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
 
-    //Added thread vars
+    //Added for timer/alarm
     int64_t ticks;    //need for ultimatly keeping thread time
+    int64_t wake_up_time;
+    struct list_elem sleeping_list_elem;
+    //For priority
+    int init_priority;
+    struct lock *wait_lock;
+    struct list donor_list;
+    struct list_elem donor_itr;
+
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
@@ -142,6 +151,6 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 //User addded
-bool comparator (const struct list_elem *, const struct list_elem *second);
+static bool comparator_priority (const struct list_elem *a, const struct list_elem *b, void* equals);
 //
 #endif /* threads/thread.h */

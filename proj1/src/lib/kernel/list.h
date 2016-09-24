@@ -122,6 +122,10 @@ struct list
 #define LIST_INITIALIZER(NAME) { { NULL, &(NAME).tail }, \
                                  { &(NAME).head, NULL } }
 
+#define list_for_each_safe(pos, n, head) \
+         for (pos = (head)->next, n = pos->next; pos != (head); \
+                 pos = n, n = pos->next)
+          
 void list_init (struct list *);
 
 /* List traversal. */
