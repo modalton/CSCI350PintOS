@@ -8,14 +8,13 @@
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
+Michael Dalton <modalton@usc.edu>
 
 ---- PRELIMINARIES ----
 
 >> If you have any preliminary comments on your submission, notes for the
 >> TAs, or extra credit, please give them here.
+
 
 >> Please cite any offline or online sources you consulted while
 >> preparing your submission, other than the Pintos documentation, course
@@ -30,26 +29,67 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+>timer.c
+static struct list sleeping_threads_list;
+	-Kept a list of all threads 'sleeping'
+
+static void wake_sleep();
+	-Goes through the sleeping threads, checks if it's time to wake up
+	 if so were gonna unblock it
+
+>thread.h
+int64_t wake_up_time;
+	-Kept the time to be woken up. Used to compare to overall time and unblock
+struct list_elem sleeping_list_elem;
+	-Used to keep track of its sleeping status. mostly refereced in timer.c
+	 where the list is maintained
+
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe what happens in a call to timer_sleep(),
 >> including the effects of the timer interrupt handler.
 
+>timer_sleep
+	We make sure we will sleep for a positive time and that interruptss are on
+	(so that we ensure a sucessful disable call). Once interrupts are disabled
+	we add the waiting amt of ticks and current amt of ticks to make the current threads wake_up_time. Then we of course block and turn on intr
+
+>timer_interrupt
+	the timer interrupt increments the ticks variable (which is used in 
+	timer_sleep to set wake_up_time). Then we call wake_sleep, unblocking
+	threads that need to wake up. A final thread_ticks() call will ensure
+	yielding if necessary bc of new changes
+
 >> A3: What steps are taken to minimize the amount of time spent in
 >> the timer interrupt handler?
+	This was a tricky one. By keeping all sleeping threads in an easily
+	accessible list we only have to traverse it once in the timer interrupt
+	handlers (so O(n)). However I have included a comparator function so the
+	list is ordered. I'm sure theres a better way to hasten completing 
+	timer_interrupt but the current implementation is fast enough
 
 ---- SYNCHRONIZATION ----
 
 >> A4: How are race conditions avoided when multiple threads call
 >> timer_sleep() simultaneously?
 
+	The interrupts are disabled preventing screwing up ticks number
+	and the insertion into the sleeping list
+
 >> A5: How are race conditions avoided when a timer interrupt occurs
 >> during a call to timer_sleep()?
+	Like above, to make sure everything goes correctly with data structures
+	that arent thread safe we have to put them in an interrupt free block
 
 ---- RATIONALE ----
 
 >> A6: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+	This design took a bit to think about since the timer is both part of
+	one thread, all current threads, and all new threads at the same time.
+	I think the way the data structures and functions were seperated into 
+	thier respective files was the easiet way to do it both logically and
+	with the least amount of code
 
 			 PRIORITY SCHEDULING
 			 ===================
@@ -58,9 +98,25 @@ FirstName LastName <email@domain.example>
 
 >> B1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
->> enumeration.  Identify the purpose of each in 25 words or less.
+>> enumeration.  Identify the purpose of each in 25 words or less. 
+
+>thread.h
+
+int init_priority;
+	This is used to discern a donated priority from the original starting one
+
+struct lock* wait_lock;
+	This is a pointer to the lock the thread is waiting on (if waiting at all)
+
+struct list donor_list;
+	A list of donors so that when the lock is released we can clear thier wait_lock
+
+struct list_elem donor_itr;
+	Assists thread in putting itself in donor_list of other threads 
 
 >> B2: Explain the data structure used to track priority donation.
+	? No one is really tracking priority donation. The priority is unique to the thread and is important for scheduling. I didn't see a need to add a 
+	data structurre to tracks donations
 >> Use ASCII art to diagram a nested donation.  (Alternately, submit a
 >> .png file.)
 
@@ -68,23 +124,57 @@ FirstName LastName <email@domain.example>
 
 >> B3: How do you ensure that the highest priority thread waiting for
 >> a lock, semaphore, or condition variable wakes up first?
+	The idea I had for timer carried over here. By replacing certain
+	push_back/push_front functions with ordered inserts we can, at any
+	time, access the highest priority thread with a simple pop_back 
 
 >> B4: Describe the sequence of events when a call to lock_acquire()
 >> causes a priority donation.  How is nested donation handled?
+	If the lock has a current holder were need to donate priority. So our 
+	thread is added to the holders donor list. Then our current threads wait
+	lock is set to the lock were attempting to acquire. We then essentially
+	'climb' up the locks and holders changing priorities until we either reach
+	a holder w/o a wait lock or a lock holder with greater than or equal
+	priority. We also only do this 'climb' a certain amount of times to prevent
+	deadlock
 
 >> B5: Describe the sequence of events when lock_release() is called
 >> on a lock that a higher-priority thread is waiting for.
+	The lock holder is reset to NULL. Then were gonna iterate the donor list
+	where we simulaneously remove threads where their wait_locks are the one
+	we are releasing and if thier wait_locks are different we take the max of
+	of all thier priorities and set it to our priority. If their are none we 
+	simply revert to init_priority. With priorities and donor lists in order
+	the subsuqent call to sema up will now wake up the highest priority thread
 
 ---- SYNCHRONIZATION ----
 
 >> B6: Describe a potential race in thread_set_priority() and explain
 >> how your implementation avoids it.  Can you use a lock to avoid
 >> this race?
+	This question is difficult bc of the ordering approach I took. So if we're
+	checking wether the init priority equals current priority (so we can change
+	the value of both simultaneously) and another thread comes in after this check and donates we have no way
+	of knowing. So on the next line of code when it comes time to see where
+	this thread, with a newly changed priority unbenownst to us, is w/respect
+	to other threads we will have incorrect ordering, which is essential to the
+	whole ordered design. To get rid of this we disable interrupts. We could
+	potentially use locks but have to be hesitant of this function possibly
+	being called from intr context. I don't know if this is a 'hack around' per
+	se but it was infinitly easier to use my method.
 
 ---- RATIONALE ----
 
 >> B7: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+	This design kind of just seemed obvious when I saw the prevelance of the
+	linked list library in every important function/data structure. By tweaking
+	the functions we could make the whole system work with relative ease.
+	However, simplicity doesn't guarentee performance. For example disabling
+	interupts in next_thread_to_run wasn't ideal. It's a cruicial part of the
+	scheduler and likely inefficient, however, I could see no work around. So
+	in essence I chose my design because I valued simplicity and coherence over
+	a potential perfromace gain
 
 			  ADVANCED SCHEDULER
 			  ==================
