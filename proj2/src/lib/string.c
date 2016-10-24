@@ -372,4 +372,3 @@ strlcat (char *dst, const char *src, size_t size)
     }
   return src_len + dst_len;
 }
-

@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "synch.h"
 
 
 /* States in a thread's life cycle. */
@@ -91,14 +92,39 @@ struct thread
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
 
-    //Added thread vars
+    //Added for timer/alarm
     int64_t ticks;    //need for ultimatly keeping thread time
+    int64_t wake_up_time;
+    struct list_elem sleeping_list_elem;
+    //For priority
+    int init_priority;
+    struct lock *wait_lock;
+    struct list donor_list;
+    struct list_elem donor_itr;
+
+
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    char *p_name;
+
+    struct list children;
+    struct list_elem child_elem; //so thread can be added to others children
+    struct thread* parent;
+
+    struct semaphore sema_lock;
+    struct semaphore sema_exe;
+
+    bool load_fail;
+    bool waiting;
+    int child_status;
+    struct list fdtable;
+    struct file* executable;
+    int fd;
 #endif
 
     /* Owned by thread.c. */
@@ -126,7 +152,7 @@ struct thread *thread_current (void);
 tid_t thread_tid (void);
 const char *thread_name (void);
 
-void thread_exit (void) NO_RETURN;
+void thread_exit (int status) NO_RETURN;
 void thread_yield (void);
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
@@ -142,6 +168,9 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 //User addded
-bool comparator (const struct list_elem *, const struct list_elem *second);
+static bool comparator_priority (const struct list_elem *a, const struct list_elem *b, void* equals);
+struct thread* get_thread(tid_t tid);
+
+
 //
 #endif /* threads/thread.h */

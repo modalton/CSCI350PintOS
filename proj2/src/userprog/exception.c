@@ -89,7 +89,7 @@ kill (struct intr_frame *f)
       printf ("%s: dying due to interrupt %#04x (%s).\n",
               thread_name (), f->vec_no, intr_name (f->vec_no));
       intr_dump_frame (f);
-      thread_exit (); 
+      thread_exit (-1); 
 
     case SEL_KCSEG:
       /* Kernel's code segment, which indicates a kernel bug.
@@ -104,7 +104,7 @@ kill (struct intr_frame *f)
          kernel. */
       printf ("Interrupt %#04x (%s) in unknown segment %04x\n",
              f->vec_no, intr_name (f->vec_no), f->cs);
-      thread_exit ();
+      thread_exit (-1);
     }
 }
 
@@ -148,6 +148,13 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+  if(fault_addr == NULL){exit(-1);}
+  if(!user){
+    f->eip = (void(*)(void))f->eax;
+    f->eax = 0xffffffff;
+    return;
+  }
+  exit(-1);
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
