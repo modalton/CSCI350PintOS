@@ -112,6 +112,8 @@ We scan through and check if it's accessed and dirty, if not so we have eviction
 >> process Q, how do you adjust the page table (and any other data
 >> structures) to reflect the frame Q no longer has?
 
+We keep a page_entry pointer in our frame entry as shown above. So we have the virtual address mapping as well as the hash elem for it's container in the thread struct. We could use the vaddr/page_entry mapping to go through threads and clear page upon finding it. But since we can view the thread in the spt entry functions, it would probably be faster to put a new pointer to our parent thread in the page_entry struct. That way we could instantly tell the parent of a page and have full access to thier page table struct. 
+
 >> B4: Explain your heuristic for deciding whether a page fault for an
 >> invalid virtual address should cause the stack to be extended into
 >> the page that faulted.
@@ -125,15 +127,24 @@ With push being the biggest allowed @ 32 bytes below the stack pointer, any virt
 >> textbook for an explanation of the necessary conditions for
 >> deadlock.)
 
+We use a global struct with locks for our swap and frame tables. Swaps isn't fully implemented yet, since it would be more of a precaution since bitmaps internals have an exclusive lock. The overall implementation is the same, the access is internal to the class, so while different processes may be calling the class functions, there's no chance of the lock being held in anything other classes operation. And with the process class never trying to acquire both swap and frame locks at the same time we can avoid circular waiting
+
 >> B6: A page fault in process P can cause another process Q's frame
 >> to be evicted.  How do you ensure that Q cannot access or modify
 >> the page during the eviction process?  How do you avoid a race
 >> between P evicting Q's frame and Q faulting the page back in?
 
+We have a singular lock for our frame page table. We also require the lock at the start of our functions like frame_evict. So even if a page faults, goes to thier supplementary page table they would have to wait if somoene other process is performing actions on the global page table. This preserves it's state and avoids a race between any processes.
+
+I also belive the design and implmentation of page fualt makes it so that if Ps kernel thread is reading the data in the function then Qs kernel page would fault and go to the supplemental page table entry and read the frame back in
+
+
 >> B7: Suppose a page fault in process P causes a page to be read from
 >> the file system or swap.  How do you ensure that a second process Q
 >> cannot interfere by e.g. attempting to evict the frame while it is
 >> still being read in?
+
+Actually my imperfect LRU implementation makes this situation a bit more likely and would require a seperate evicatable attribute to prevent this 
 
 >> B8: Explain how you handle access to paged-out pages that occur
 >> during system calls.  Do you use page faults to bring in pages (as
@@ -150,6 +161,8 @@ With push being the biggest allowed @ 32 bytes below the stack pointer, any virt
 >> where your design falls along this continuum and why you chose to
 >> design it this way.
 
+I think my program, especially with its global structures, locks, and reliance and specific variables to prevent deadlock, my design leans more towards the single long implementation. My kind of guiding principle for desigining this was silimar to the books recomended practice of starting with one lock and implmenting more little by little to gain additional performance.
+
 			 MEMORY MAPPED FILES
 			 ===================
 
@@ -159,14 +172,30 @@ With push being the biggest allowed @ 32 bytes below the stack pointer, any virt
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+struct mmentry
+{
+	struct file* file;
+	void* ptr;
+	int mapid;
+	int totalpgs;
+	
+	struct hash_elem hash_elem;
+};
+
+Pretty self explanitory struct variables for a memory mapped file. The id, mapped file, starting addr, and the number of pages for said memory mapping. A hash table of these are in every thread 
+
 ---- ALGORITHMS ----
 
 >> C2: Describe how memory mapped files integrate into your virtual
 >> memory subsystem.  Explain how the page fault and eviction
 >> processes differ between swap pages and other pages.
 
+Both types of files are loaded in the pintos specified lazy way. Reading from the mmaped file is nearly identical to the executable for a page fault. But the un/mmap functionality is all done through syscalls. During it's unmaping we go through and write back and dirty pages if necessary. 
+
 >> C3: Explain how you determine whether a new file mapping overlaps
 >> any existing segment.
+
+We get the filesize and from the starting address go one page at a time and see if we have any overlaps. We must go over the page table and spt to make sure we don't have an overlap.
 
 ---- RATIONALE ----
 
@@ -176,6 +205,8 @@ With push being the biggest allowed @ 32 bytes below the stack pointer, any virt
 >> that much of their implementation can be shared.  Explain why your
 >> implementation either does or does not share much of the code for
 >> the two situations.
+
+Having never even used memory mapped files in applications or really being all too familiar with it, I strived to keep them sepereation for clarity. Quite frankly thier similarity is the reason I did it because it just makes it easier to get confused and find mistakes.
 
 			   SURVEY QUESTIONS
 			   ================
