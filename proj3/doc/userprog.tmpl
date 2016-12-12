@@ -1,0 +1,190 @@
+		     +--------------------------+
+       	       	     |		CS 140		|
+		     | PROJECT 2: USER PROGRAMS	|
+		     | 	   DESIGN DOCUMENT     	|
+		     +--------------------------+
+
+---- GROUP ----
+
+>> Fill in the names and email addresses of your group members.
+
+FirstName LastName <email@domain.example>
+FirstName LastName <email@domain.example>
+FirstName LastName <email@domain.example>
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+			   ARGUMENT PASSING
+			   ================
+
+---- DATA STRUCTURES ----
+
+>> A1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+	No significant change to data structures. The argument passing is mostly achieved by local variables being passed to different helper functions to in a sense 'link them'. Descriptions of these are in the Algorithims section.
+
+
+---- ALGORITHMS ----
+
+>> A2: Briefly describe how you implemented argument parsing.  How do
+>> you arrange for the elements of argv[] to be in the right order?
+
+	I altered setup stack to take the additional arguments of (char** argv) and (int argc) as well as adding the following function void stack_prep(char* cmd_string, char* argv[], int* argc). Argument parsing is implmented by first taking the command line string and using stack_prep to populate the variables and values that will be written to the stack. This makes things much easier for setup_stack which only needs to use phys_base and pointer arithmetic to both write the values and variable addreses to the stack 'in reverse' by using -= where one would normal use += to iterate.
+
+>> How do you avoid overflowing the stack page?
+	Our argument passes the command line after we use a strcpy with our max page size so even an invalid input will be cut off before it can overflow the buffer and then stack. Also we have a check to make sure we dont have more than 30 args since the address where each one is in the esp to be written to the esp (stack). A ridiculous amount of args could potentially overflow the stack if the user maxed out the command line with single letters.
+
+---- RATIONALE ----
+
+>> A3: Why does Pintos implement strtok_r() but not strtok()?
+	The _r version is reentrant which means you can call it from multiple places/threads without sacrificing state. However strtok uses global state so something like multiple threads would make it unsafe to use because you could never tell/control where you were. Pintos probably chose to implement only strok_r since developers wouldn't have any idea of the limitations of strtok
+
+>> A4: In Pintos, the kernel separates commands into a executable name
+>> and arguments.  In Unix-like systems, the shell does this
+>> separation.  Identify at least two advantages of the Unix approach.
+	First off the Unix approach can prevent a fair amount of malicious user code. The inability to seperate executables from arguments can open a plethora of security problems. We saw the crazy parentheses required for the casting of the syscall buffer to prevent strange kernel panics, imagine a similar situation with a greater degree of user input. Also, the Unix approach increases portability. By assuming the shell handles the user input we increase portability of both and likely increase code comphrehension and possibly performance (ex. easier to fit in regex library in shell than parsing in kernel).
+
+			     SYSTEM CALLS
+			     ============
+
+---- DATA STRUCTURES ----
+
+>> B1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+-	struct fd_elem
+{
+  int fd;
+  char* name;
+  struct file* file;
+  struct list_elem elem;
+};
+
+In thread.h:
+struct list fdtable;
+int fd;
+
+	The above were added to simplify the file descriptions. Since fd is changing, different from thread to thread, can point to the same orr different files, etc, it seemed like a good idea to chunk them into fd_elem and add/remove them from threads as logic dictates.
+
+-In thread.h:struct list children, list_elem child_elem
+	Keeps the list of current children of this thread. Other threads access child_elem when adding child thread to thier list. Useful for logic, especially wait. By removing after a process_wait we can prevent double waits
+
+-In thread.h: semaphore sema_lock, sema_exe
+	These locks prevent early termination and ensure multiple logic steps in the system calls. Due to the nature of interupts and current design we aren't able to use thread_yield, thread_block, etc to force premption. Sema_lock is used for exec and wait logic, sema_exe is to make sure the executable has loaded properly in child before we process it willy nilly
+
+-In thread.h: int child_status
+	With the sema_lock ensuring execution we still didn't have a thread safe way to return the tid of an exiting child. Since we only sema_up when exiting, if we update our parents child status before unlock it and exit, it guarentees a proper return value with one or two additional lines of code.
+
+
+-In thread.h: struct file* executable
+	We keep a copy of the threads executable. This lets the parent know where to check that the child is loaded and allows us to identify processes. Very useful in the exec syscall
+
+
+>> B2: Describe how file descriptors are associated with open files.
+>> Are file descriptors unique within the entire OS or just within a
+>> single process?
+	File descriptors use the struct file_elem defined above and map to open files. The file descripters are only unique within a process. Thats why each thread has its own list of elements which are populated from when the thread calls the open syscall.
+
+---- ALGORITHMS ----
+
+>> B3: Describe your code for reading and writing user data from the
+>> kernel.
+	Both cases are kind of similar. In both we lock our filesys lock then in read we check from STDIN and call input_getc and in write we check for STDOUT and call putbuf. Both of these will get/set user data to the kernel. After this we release the lock. The other fds in read/write use functions from the filesys function. I don't know if these technically count since kernel threads could technically access them.
+
+>> B4: Suppose a system call causes a full page (4,096 bytes) of data
+>> to be copied from user space into the kernel.  What is the least
+>> and the greatest possible number of inspections of the page table
+>> (e.g. calls to pagedir_get_page()) that might result?  What about
+>> for a system call that only copies 2 bytes of data?  Is there room
+>> for improvement in these numbers, and how much?
+
+>> B5: Briefly describe your implementation of the "wait" system call
+>> and how it interacts with process termination.
+	The wait syscall calls process_wait and passes the child pid we want to wait on. We check our children for it (remember from above if its not there then we've already waited and removed it) as well as checking if the child is already waiting. If neither of these conditions are met we can wait on it. The sema_lock mentioned above guarentees that whatever is being waited on, must exit before the parent thread and provide it the correct tid (even if the kernel kills it).
+
+>> B6: Any access to user program memory at a user-specified address
+>> can fail due to a bad pointer value.  Such accesses must cause the
+>> process to be terminated.  System calls are fraught with such
+>> accesses, e.g. a "write" system call requires reading the system
+>> call number from the user stack, then each of the call's three
+>> arguments, then an arbitrary amount of user memory, and any of
+>> these can fail at any point.  This poses a design and
+>> error-handling problem: how do you best avoid obscuring the primary
+>> function of code in a morass of error-handling?  Furthermore, when
+>> an error is detected, how do you ensure that all temporarily
+>> allocated resources (locks, buffers, etc.) are freed?  In a few
+>> paragraphs, describe the strategy or strategies you adopted for
+>> managing these issues.  Give an example.
+	My main function was ptr_check(void* vaddr). It would check if the vaddr was techincally a user address, if the pointer is below the phys_base (pretty much redundant but better safe than sorry) and also check if the pointer is mapped to value (if not its a seg fault). The other area I did some pointer validation was in the page_fault function. Since some pointer errors can occur before syscalls are initalized we have to put some checks in to make sure we handle a page fault gracefully.
+
+---- SYNCHRONIZATION ----
+
+>> B7: The "exec" system call returns -1 if loading the new executable
+>> fails, so it cannot return before the new executable has completed
+>> loading.  How does your code ensure this?  How is the load
+>> success/failure status passed back to the thread that calls "exec"?
+	I kinda of described it above but I will do it again. Them semaphores guarentee us two synchronization properties. In regards to the question, the previously mentioned sema_exe guarentees that our soon to be child process has a properly loaded executable before we return. If we don't have a semaphore, there are no synchronization techniques in the code to prevent us from creating the new thread then exiting before the new thread calls it's start_process and potentially discovers a problem like missing-exec or something. By locking ourselves and putting the only unlock in start_process it simulates a wait for loading the executable and allows us to flag the child for having failed. Then when we return to the exec in the main thread we can handle it appropiatly.
+
+>> B8: Consider parent process P with child process C.  How do you
+>> ensure proper synchronization and avoid race conditions when P
+>> calls wait(C) before C exits?  After C exits?  How do you ensure
+>> that all resources are freed in each case?  How about when P
+>> terminates without waiting, before C exits?  After C exits?  Are
+>> there any special cases?
+
+P calls wait(C) before C exits
+	First we make sure that C is eligible for P to call wait on and it isn't already waiting, etc. We down our own sema_lock and since we can only wait on one process at a time and only our one child process exiting contains the sema_up we have a successful implementation of wait. Once were done waiting we remove the child from P so it can't be called again.
+
+P "           " after C exits
+	If we call wait after C has already exited then when we go to pass the tid in it won't be our child since we showed earlier how a child remove prevents a double wait.
+
+The only special value I can see is P terminating with waiting before C exits. Since there is a point where both P and C are avialable for the processer before the sema is reached it's possible for this to technically happen. In the C exit our logic makes sure our parent isn't dead so we don't try logic on a null pointer. If it's null, C still finishes as usual.
+
+
+
+---- RATIONALE ----
+
+>> B9: Why did you choose to implement access to user memory from the
+>> kernel in the way that you did?
+	The read and write were already seperated by the syscalls so it seemed appropriate to separate access to user memory following that fashion.
+
+>> B10: What advantages or disadvantages can you see to your design
+>> for file descriptors?
+	The data structure for file descriptors was absolutly necessary to cut down on spaghetti code and simplify syscall logic. Many functions call get_elem(fd) to access files and other attributes stored there. It's much easier to pass the fd you want to a thread and see if has it stored than to try to reverse engineer the same data from open files.
+
+>> B11: The default tid_t to pid_t mapping is the identity mapping.
+>> If you changed it, what advantages are there to your approach?
+	Umm I didn't put too much thought into it but I thought some of the restrictions put on threads rendered them more like processes and the few things processes could do were just like threads. So to make things easier I treated them all as 'dumb' threads. This really only made it easier for my sanity when it comes to studying the difference between threads and processes.
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?
